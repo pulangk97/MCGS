@@ -25,7 +25,7 @@ bash ./scripts/llff.sh
 ```
 bash ./scripts/blender.sh
 ```
-
+ 
 ### Citation
 ```
 @article{xiao2024mcgs,

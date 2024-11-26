@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
- 
+  
 import torch
 import sys
 from datetime import datetime

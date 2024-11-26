@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
- 
+  
 from pathlib import Path
 import os
 from PIL import Image

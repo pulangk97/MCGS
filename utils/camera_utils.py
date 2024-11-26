@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
- 
+  
 from scene.cameras import Camera
 import numpy as np
 from utils.general_utils import PILtoTorch

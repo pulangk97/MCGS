@@ -4,7 +4,7 @@
 num_views=8
 base_path=/media/xyr/data22/datasets/datasets/nerf_synthetic
 
-
+ 
 datasets=("chair" "drums" "ficus" "hotdog" "lego" "materials" "mic" "ship")
 
 for dataset in "${datasets[@]}"; do

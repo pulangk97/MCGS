@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
- 
+  
 import torch
 from scene import Scene
 import os

@@ -4,7 +4,7 @@ import torch.nn as nn
 from .networks import get_network, LinLayers
 from .utils import get_state_dict
 
-
+ 
 class LPIPS(nn.Module):
     r"""Creates a criterion that measures
     Learned Perceptual Image Patch Similarity (LPIPS).
