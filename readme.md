@@ -26,3 +26,13 @@ bash ./scripts/llff.sh
 bash ./scripts/blender.sh
 ```
 
+### Citation
+```
+@article{xiao2024mcgs,
+  title={MCGS: Multiview Consistency Enhancement for Sparse-View 3D Gaussian Radiance Fields},
+  author={Xiao, Yuru and Zhai, Deming and Zhao, Wenbo and Jiang, Kui and Jiang, Junjun and Liu, Xianming},
+  journal={arXiv preprint arXiv:2410.11394},
+  year={2024}
+}
+```
+
