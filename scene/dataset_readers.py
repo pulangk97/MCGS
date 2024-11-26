@@ -623,15 +623,6 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
                 train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in idx_train]
                 test_cam_infos = eval_cam_infos
 
-        elif dataset == "DTU":
-            train_idx = [25, 22, 28, 40, 44, 48, 0, 8, 13]
-            exclude_idx = [3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 36, 37, 38, 39]
-            test_idx = [i for i in np.arange(49) if i not in train_idx + exclude_idx]
-            if N_sparse > 0:
-                train_idx = train_idx[:N_sparse]
-            train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in train_idx]
-            test_cam_infos = [c for idx, c in enumerate(cam_infos) if idx in test_idx]
-            eval_cam_infos = test_cam_infos
         else:
             raise NotImplementedError
     else:
@@ -666,10 +657,7 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
             pcd_shape = (topk_(xyz, 1, 0)[-1] + topk_(-xyz, 1, 0)[-1])
             num_pts = int(pcd_shape.max() * 50)
             xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 20, 0)[-1]
-        elif dataset == "DTU":
-            pcd_shape = (topk_(xyz, 100, 0)[-1] + topk_(-xyz, 100, 0)[-1])
-            num_pts = 10_00
-            xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 100, 0)[-1] # - 0.15 * pcd_shape
+
         print(f"Generating random point cloud ({num_pts})...")
 
         shs = np.random.random((num_pts, 3)) / 255.0
@@ -757,51 +745,6 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
             print("using COLMAP for initial point cloud!")
 
     if add_rand:
-
-        if dataset == "DTU":
-            # # ## random init in blank place
-            point_ = pcd.points
-            color_ = pcd.colors
-            try:
-                point_ = point_.numpy()
-                color_ = color_.numpy()
-            except:
-                point_ = point_
-                color_ = color_
-            print('Init random point cloud.')
-            # ply_path = os.path.join(path, "sparse/0/points3D_random.ply")
-            bin_path = os.path.join(path, "sparse/0/points3D.bin")
-            txt_path = os.path.join(path, "sparse/0/points3D.txt")
-
-            try:
-                xyz, rgb, _ = read_points3D_binary(bin_path)
-            except:
-                xyz, rgb, _ = read_points3D_text(txt_path)
-            # # print(xyz.max(0), xyz.min(0))
-            pcd_shape = (topk_(xyz, 100, 0)[-1] + topk_(-xyz, 100, 0)[-1])
-            num_pts = 200 # 1000
-            xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 100, 0)[-1] # - 0.15 * pcd_shape        
-
-            box_bound, ct_bound = compute_bound(xyz)
-            oct_resolution = 32 
-            oct = octree(point_, box_bound, resolution=oct_resolution)  
-            num_ori = len(oct.point_cloud)  
-            point_ = oct.add_points(xyz,resolution=oct_resolution)
-
-            num_added = len(point_) - num_ori
-
-            shs = np.random.random((num_added, 3)) / 255.0
-
-            color_ = np.concatenate((color_, SH2RGB(shs)),axis=0)
-            num_pts = point_.shape[0]
-
-            pcd = BasicPointCloud(points=point_, colors=color_, normals=np.zeros((num_pts, 3)))
-
-            ply_path = os.path.join(path, "sparse/0/points3D_random.ply")
-            storePly(ply_path, point_, color_ * 255)
-
-
-        else:
             # # ## random init in blank place
             point_ = pcd.points
             color_ = pcd.colors
@@ -813,8 +756,8 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
                 color_ = color_
                 
             pcd_shape = (topk_(point_, 1, 0)[-1] + topk_(-point_, 1, 0)[-1])
-            # num_pts = int(pcd_shape.max() * 20)
-            num_pts = 1000 # llff: 1000 360:2000
+
+            num_pts = 1000 
             print("num random points:"+str(num_pts))
 
             xyz = np.random.random((num_pts, 3)) * (np.max(point_,axis=0)-np.min(point_,axis=0)) * 1.3 + np.min(point_,axis=0) - (np.max(point_,axis=0)-np.min(point_,axis=0)) * 0.15# 1.3
