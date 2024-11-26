@@ -57,13 +57,13 @@ class ModelParams(ParamGroup):
         self.dataset = ""
         self.rand_pcd = False
         self.mvs_pcd = False
-        self.sparse_pcd = True
+        self.sparse_pcd = False
         self.dense_pcd = False
-        self.add_rand = True
+        self.add_rand = False
         self.if_prune = False
-        self.train_mvs_prune = True
+        self.train_mvs_prune = False
 
-        self.if_TV = True
+        self.if_TV = False
     
         self.n_sparse = -1
         super().__init__(parser, "Loading Parameters", sentinel)
