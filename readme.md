@@ -8,6 +8,11 @@ Install the following dependency
 ```
 conda env create -f environment.yml  
 
+cd submodules
+git clone git@github.com:ashawkey/diff-gaussian-rasterization.git --recursive
+git clone https://gitlab.inria.fr/bkerbl/simple-knn.git
+
+
 pip install ./submodules/diff-gaussian-rasterization  
 pip install ./submodules/simple-knn  
 pip install ./LightGlue
