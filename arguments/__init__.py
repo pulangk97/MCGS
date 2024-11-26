@@ -120,7 +120,7 @@ class OptimizationParams(ParamGroup):
         self.num_mask = 8000
 
         self.tv_weight = 0.0003 # blender:0.01 llff:0.0003
-        self.tv_start = 0 # blender:3000 llff:9000
+        self.tv_start = 9000 # blender:3000 llff:9000
 
 
         # original gs
