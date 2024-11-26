@@ -23,7 +23,6 @@ from gaussian_renderer import GaussianModel
 import numpy as np
 import matplotlib.cm as cm
 import cv2
-import time
 def weighted_percentile(x, w, ps, assume_sorted=False):
     """Compute the weighted percentile(s) of a single vector."""
     x = x.reshape([-1])
@@ -71,47 +70,19 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gts_path, exist_ok=True)
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-        if_eval_efficiency = False
-        if if_eval_efficiency == True:
-            save_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/gaussian-splatting/output/efficiency_eval"
-            print("evaluate efficiency once!")
-            start_time = time.time()
-            rendering_pkg = render(view, gaussians, pipeline, background)
-            end_time = time.time()
-            print(f"rendering time: {end_time - start_time} s")
-            with open(save_path+"/efficiency.txt", "a") as file:
-                file.write(f"Gaussians:: {gaussians.get_xyz.shape[0]} ")
-                file.write(f"render time(s): {end_time - start_time}\n")
 
-            assert False, print("evaluate efficiency done!")
-        else:
-            rendering_pkg = render(view, gaussians, pipeline, background)
-        # rendering_pkg = render(view, gaussians, pipeline, background, if_eval_efficiency = True)
+        rendering_pkg = render(view, gaussians, pipeline, background)
         rendering = rendering_pkg["render"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
 
         if args.render_depth:
-            # print(torch.max(rendering_pkg['depth'][rendering_pkg['depth']>0]))
-            # print(rendering_pkg['depth'].shape)
 
             depth_map = vis_depth(rendering_pkg['depth'][0].detach().cpu().numpy())
             np.save(os.path.join(render_path, view.image_name + '_depth.npy'), rendering_pkg['depth'][0].detach().cpu().numpy())
             cv2.imwrite(os.path.join(render_path, view.image_name + '_depth.png'), depth_map)
 
-# def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
-#     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
-#     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
-
-#     makedirs(render_path, exist_ok=True)
-#     makedirs(gts_path, exist_ok=True)
-
-#     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
-#         rendering = render(view, gaussians, pipeline, background)["render"]
-#         gt = view.original_image[0:3, :, :]
-#         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
-#         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
 
 def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool):
     with torch.no_grad():

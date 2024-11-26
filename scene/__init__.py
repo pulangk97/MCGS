@@ -42,15 +42,12 @@ class Scene:
 
 
         if os.path.exists(os.path.join(args.source_path, "sparse")):
-            # scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.dataset, args.eval, args.rand_pcd, args.mvs_pcd, args.sparse_pcd, args.dense_pcd, add_rand = args.add_rand, if_prune = args.if_prune, N_sparse = args.n_sparse, resolution = args.resolution)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, args.rand_pcd, args.sparse_pcd, args.add_rand,args.if_prune, N_sparse = args.n_sparse, resolution= args.resolution)
-            # scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
         else:
             assert False, "Could not recognize scene type!"
-        # print(scene_info.point_cloud.points.shape)
         if not self.loaded_iter:
             with open(scene_info.ply_path, 'rb') as src_file, open(os.path.join(self.model_path, "input.ply") , 'wb') as dest_file:
                 dest_file.write(src_file.read())
@@ -83,7 +80,6 @@ class Scene:
                                                            "iteration_" + str(self.loaded_iter),
                                                            "point_cloud.ply"))
         else:
-            # print(scene_info.point_cloud.points.shape)
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
 
     def save(self, iteration):

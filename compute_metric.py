@@ -1,8 +1,7 @@
 import numpy as np
 import os
 import json
-# source_path = "/data_b/xiaoyuru/xyr/3DGS/3DGS_base/output/gs/llff_3_fssetting_maskabl/mask_0.05"
-# ckp_name = "ours_10000"
+
 
 def compute_ave_metrics(source_path, ckp_name):
     target_path = source_path+"/results.json"
@@ -36,12 +35,10 @@ def compute_ave_metrics(source_path, ckp_name):
         json.dump(data, file, ensure_ascii=False, indent=4)
 
 
-# source_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/gaussian-splatting/output/sa/llff_3"
-source_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/MCGS/output/sa/llff_3"
+
+source_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/MCGS/output/sa/blender_8"
 ckp_name = "ours_10000"
 compute_ave_metrics(source_path, ckp_name)
-# for i in range(5,105,5):
-#     abl_dir = f"mask_{float(i)/100:.2f}"
-#     compute_ave_metrics(source_path+"/"+abl_dir, ckp_name)
+
     
 

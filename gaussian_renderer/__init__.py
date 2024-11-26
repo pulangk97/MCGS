@@ -85,42 +85,6 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     else:
         colors_precomp = override_color
 
-    # # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-    # rendered_image, radii, depth, alpha = rasterizer(
-    #     means3D = means3D,
-    #     means2D = means2D,
-    #     shs = shs,
-    #     colors_precomp = colors_precomp,
-    #     opacities = opacity,
-    #     scales = scales,
-    #     rotations = rotations,
-    #     cov3D_precomp = cov3D_precomp)
-    
-    # if if_eval_efficiency:
-
-    #     save_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/gaussian-splatting/output/efficiency_eval"
-    #     print("evaluate efficiency once!")
-    #     start_time = time.time()
-    #     rendered_image, radii, depth, alpha = rasterizer(means3D, means2D, opacity, shs, colors_precomp, scales, rotations, cov3D_precomp)
-    #     end_time = time.time()
-    #     print(f"rendering time: {end_time - start_time} s")
-    #     with open(save_path+"/efficiency.txt", "a") as file:
-    #         file.write(f"Gaussians:: {means3D.shape[0]} ")
-    #         file.write(f"render time(s): {end_time - start_time}\n")
-
-    #     assert False, print("evaluate efficiency done!")
-    # else:
-        # # Rasterize visible Gaussians to image, obtain their radii (on screen). 
-        # rendered_image, radii, depth, alpha = rasterizer(
-        #     means3D = means3D,
-        #     means2D = means2D,
-        #     shs = shs,
-        #     colors_precomp = colors_precomp,
-        #     opacities = opacity,
-        #     scales = scales,
-        #     rotations = rotations,
-        #     cov3D_precomp = cov3D_precomp)
-
 
     # Rasterize visible Gaussians to image, obtain their radii (on screen). 
     rendered_image, radii, depth, alpha = rasterizer(

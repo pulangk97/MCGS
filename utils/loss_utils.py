@@ -62,3 +62,21 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
     else:
         return ssim_map.mean(1).mean(1).mean(1)
 
+def edge_aware_smooth_loss(rgb, depth, beita = 2,  grad_type="sobel"):
+    if grad_type == "tv":
+        rgb_grad_h = torch.pow(rgb[:,1:,:]-rgb[:,:-1,:], 2).mean()
+        rgb_grad_w = torch.pow(rgb[:,:,1:]-rgb[:,:,:-1], 2).mean()
+        depth_grad_h = torch.pow(depth[:,1:,:]-depth[:,:-1,:], 2).mean()
+        depth_grad_w = torch.pow(depth[:,:,1:]-depth[:,:,:-1], 2).mean()
+    elif grad_type == "sobel":
+        temp_w = torch.tensor([[-1,0,1], [-2,0,2],[-1,0,1]],requires_grad=False, dtype=torch.float)[None,None,...].expand([1,3,3,3]).to(rgb.device)
+        temp_h = torch.tensor([[-1,-2,-1],[0,0,0],[1,2,1]],requires_grad=False, dtype=torch.float)[None,None,...].expand([1,3,3,3]).to(rgb.device)
+        rgb_grad_h = torch.abs(torch.nn.functional.conv2d(rgb[None,...],temp_h))
+        rgb_grad_w = torch.abs(torch.nn.functional.conv2d(rgb[None,...],temp_w))
+
+        depth_grad_h = torch.abs(torch.nn.functional.conv2d(depth[None,...],temp_h[:,:1,...]))
+        depth_grad_w = torch.abs(torch.nn.functional.conv2d(depth[None,...],temp_w[:,:1,...]))
+
+    loss_eas = torch.mean(depth_grad_h*torch.exp(-beita*rgb_grad_h)+depth_grad_w*torch.exp(-beita*rgb_grad_w))
+    return loss_eas
+
