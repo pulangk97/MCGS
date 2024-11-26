@@ -54,6 +54,21 @@ class ModelParams(ParamGroup):
         self._white_background = False
         self.data_device = "cuda"
         self.eval = False
+        self.dataset = ""
+        self.rand_pcd = False
+        self.mvs_pcd = False
+        self.sparse_pcd = True
+        self.dense_pcd = False
+        self.add_rand = True
+        self.if_prune = True
+        self.train_mvs_prune = True
+
+        self.if_continue_reg = False
+        self.if_bkg_occ = False
+        self.if_occ_prune = False
+        self.if_TV = True
+    
+        self.n_sparse = -1
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -70,23 +85,63 @@ class PipelineParams(ParamGroup):
 
 class OptimizationParams(ParamGroup):
     def __init__(self, parser):
-        self.iterations = 30_000
-        self.position_lr_init = 0.00016
-        self.position_lr_final = 0.0000016
+        self.iterations = 10000
+        self.position_lr_init = 0.0016 
+        self.position_lr_final = 0.000016 
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 30_000
+        self.position_lr_max_steps = 10000
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.005
         self.rotation_lr = 0.001
         self.percent_dense = 0.01
-        self.lambda_dssim = 0.2
-        self.densification_interval = 100
-        self.opacity_reset_interval = 3000
+        self.lambda_dssim = 0.2 
+        self.densification_interval = 300 
+        self.opacity_reset_interval = 1000 
         self.densify_from_iter = 500
-        self.densify_until_iter = 15_000
-        self.densify_grad_threshold = 0.0002
+        self.prune_from_iter = 500
+        self.densify_until_iter = 10000
+        self.densify_grad_threshold = 0.0005 # llff: 0.0005  blender:0.0003
+        self.prune_threshold = 0.005 # 0.005 0.001
         self.random_background = False
+
+        self.mvs_prune_threshold = 0.8
+        self.mvs_prune_iterval = 3000 # llff:3000 blender: 2000 360: 2000
+        self.mvs_prune_end = 10000 # 10000 360: 6000
+        self.mvs_prune_start = 0
+
+
+        self.continue_reg_weight = 0.0005 # llff:0.0005 blender:1
+        self.occ_reg_weight = 0.05
+
+        self.occ_loss_weight = 0.00
+        self.occ_num = 500
+
+        self.num_mask = 8000
+
+        self.tv_weight = 0.0003 # blender:0.01 llff:0.0003
+        self.tv_start = 0 # blender:3000 llff:9000
+
+
+        # original gs
+        # self.iterations = 30_000
+        # self.position_lr_init = 0.00016
+        # self.position_lr_final = 0.0000016
+        # self.position_lr_delay_mult = 0.01
+        # self.position_lr_max_steps = 30_000
+        # self.feature_lr = 0.0025
+        # self.opacity_lr = 0.05
+        # self.scaling_lr = 0.005
+        # self.rotation_lr = 0.001
+        # self.percent_dense = 0.01
+        # self.lambda_dssim = 0.2
+        # self.densification_interval = 100
+        # self.opacity_reset_interval = 3000
+        # self.densify_from_iter = 500
+        # self.densify_until_iter = 15_000
+        # self.densify_grad_threshold = 0.0002
+        # self.prune_threshold = 0.005 # 0.005
+        # self.random_background = False
         super().__init__(parser, "Optimization Parameters")
 
 def get_combined_args(parser : ArgumentParser):

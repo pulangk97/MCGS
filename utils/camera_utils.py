@@ -15,8 +15,82 @@ from utils.general_utils import PILtoTorch
 from utils.graphics_utils import fov2focal
 
 WARNED = False
+##
+import torch
+import torch.nn.functional as F
+def get_img_feature(img, model, if_cont_rgb=False, layeridx = [2,6,40,84]): #[2,6,40,84]
+    def get_featuremap(layer_output, image_shape, idx=[2,6,40,84]):
+        featuremap = torch.tensor([])
+        for i in idx:
+            out = layer_output[i]
+            for key, value in out.items():
+                scale_factor = (image_shape[0]/value.shape[-2],image_shape[1]/value.shape[-1])
+                output_tensor = F.interpolate(value, scale_factor=scale_factor, mode='bilinear', align_corners=True)
 
-def loadCam(args, id, cam_info, resolution_scale):
+                featuremap = torch.concat((featuremap, output_tensor), dim=1)
+
+        return featuremap
+
+    def forward_hook(module, input, output):
+
+        class_name = module.__class__.__name__
+        data = { class_name: output
+
+        }
+        layer_outputs.append(data)
+
+    layer_outputs = []
+
+    for name, layer in model.named_modules():
+        layer.register_forward_hook(forward_hook)
+
+    model = model
+    output = model(img)
+    shape = img.shape[-2:]
+    featuremap = get_featuremap(layer_output=layer_outputs, image_shape=shape, idx=layeridx)   
+    if if_cont_rgb == True:
+        
+        featuremap = torch.concat((img[None,...],featuremap),dim=1) 
+    featuremap = featuremap/torch.norm(featuremap,dim=1)
+    # cat_feature = torch.concat((img[None,...],norm_featuremap),dim=1)
+    # print("feature shape"+str(featuremap.shape))
+
+    return featuremap.squeeze()
+####  no concat rgb ###########
+# def get_img_feature(img, model,  layeridx = [2,6,40,84]): #[2,6,40,84]
+#     def get_featuremap(layer_output, image_shape, idx=[2,6,40,84]):
+#         featuremap = torch.tensor([])
+#         for i in idx:
+#             out = layer_output[i]
+#             for key, value in out.items():
+#                 scale_factor = (image_shape[0]/value.shape[-2],image_shape[1]/value.shape[-1])
+#                 output_tensor = F.interpolate(value, scale_factor=scale_factor, mode='bilinear', align_corners=True)
+
+#                 featuremap = torch.concat((featuremap, output_tensor), dim=1)
+
+#         return featuremap
+
+#     def forward_hook(module, input, output):
+
+#         class_name = module.__class__.__name__
+#         data = { class_name: output
+
+#         }
+#         layer_outputs.append(data)
+
+#     layer_outputs = []
+
+#     for name, layer in model.named_modules():
+#         layer.register_forward_hook(forward_hook)
+
+#     model = model
+#     output = model(img)
+#     shape = img.shape[-2:]
+#     featuremap = get_featuremap(layer_output=layer_outputs, image_shape=shape, idx=layeridx)    
+#     return featuremap.squeeze()
+
+
+def loadCam(args, id, cam_info, resolution_scale, feature_extract_model):
     orig_w, orig_h = cam_info.image.size
 
     if args.resolution in [1, 2, 4, 8]:
@@ -42,20 +116,39 @@ def loadCam(args, id, cam_info, resolution_scale):
 
     gt_image = resized_image_rgb[:3, ...]
     loaded_mask = None
+    
+    ############# get image feature from gt image by DINO ###############
+    # resnet50 = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
+    if feature_extract_model!=None:
+        gt_feature = get_img_feature(gt_image[None,...], model = feature_extract_model)
+    else:
+        gt_feature = None
+    #############                                         ###############
 
+    # print("debug")
     if resized_image_rgb.shape[1] == 4:
         loaded_mask = resized_image_rgb[3:4, ...]
-
+    #############     return Camera with gt feature   ###############
     return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
                   FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
-                  image=gt_image, gt_alpha_mask=loaded_mask,
+                  image=gt_image, image_feature = gt_feature, gt_alpha_mask=loaded_mask,
                   image_name=cam_info.image_name, uid=id, data_device=args.data_device)
+    # return Camera(colmap_id=cam_info.uid, R=cam_info.R, T=cam_info.T, 
+    #               FoVx=cam_info.FovX, FoVy=cam_info.FovY, 
+    #               image=gt_image, gt_alpha_mask=loaded_mask,
+    #               image_name=cam_info.image_name, uid=id, data_device=args.data_device)
 
-def cameraList_from_camInfos(cam_infos, resolution_scale, args):
+def cameraList_from_camInfos(cam_infos, resolution_scale, args, test=False):
     camera_list = []
+    ############# initialize model ###############
+    if test==False:
+        resnet50 = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
+    else:
+        resnet50 = None
 
+    
     for id, c in enumerate(cam_infos):
-        camera_list.append(loadCam(args, id, c, resolution_scale))
+        camera_list.append(loadCam(args, id, c, resolution_scale, resnet50))
 
     return camera_list
 

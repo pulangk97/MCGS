@@ -21,6 +21,100 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
+
+# import math
+from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
+
+def get_mvs_prune_mask(points , cams, prune_thr=0.8, mask=None):
+    # resnet50 = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
+    # feature_extract_model = resnet50
+    # print(points)
+    points = points.clone().to("cpu")
+
+    def feature_sim(feature0,feature1):
+        f0 = feature0
+        f1 = feature1
+        sim_map = torch.sum(f0*f1,dim=0)/(torch.norm(f0,dim=0)*torch.norm(f1,dim=0))
+        return sim_map
+
+    # resolution = (cams[0].image_width, cams[0].image_height)
+    images = [infos.original_image.clone().to("cpu") for infos in cams]   
+
+
+    # if mask !=None:
+    #     features =   [infos.original_feature[mask, ...]/torch.norm(infos.original_feature[mask, ...],dim=0) for infos in cams]   
+    # else:
+    #     features =   [infos.original_feature/torch.norm(infos.original_feature,dim=0)  for infos in cams]   
+    if mask !=None:
+        features =   [infos.original_feature[mask, ...] for infos in cams]   
+    else:
+        features =   [infos.original_feature for infos in cams]   
+
+    T = [torch.tensor(infos.T,dtype = torch.float).to("cpu") for infos in cams]
+    R = [torch.tensor(infos.R,dtype = torch.float).to("cpu") for infos in cams]
+    FovY = [infos.FoVy for infos in cams]
+    FovX = [infos.FoVx for infos in cams]
+
+    H,W = images[0].shape[1:]
+
+    focal_y =  fov2focal(FovY[0], H)
+    focal_x =  fov2focal(FovX[0], W)
+
+    
+    K = torch.tensor(
+        [
+            [focal_x, 0, W/2],
+            [0, focal_y, H/2],
+            [0, 0, 1],
+        ],
+        dtype=torch.float32,
+    )
+    feature_map = torch.tensor([])
+    uv = torch.tensor([])
+    for idx, img in enumerate(images):
+        # feature_map.append(get_img_feature(img[None,...],model=feature_extract_model))
+        img_feature = features[idx]
+        feature_map = torch.concat((feature_map,img_feature[None,...]),dim=0)
+        w2v = getWorld2View2(R=R[idx].numpy(),t=T[idx].numpy())
+        R_w2v = torch.tensor(w2v[:3,:3], dtype=torch.float32)
+        T_w2v = torch.tensor(w2v[:3,-1], dtype=torch.float32)
+
+        point_c = (R_w2v[None,...] @ points[...,None])[...,0] + T_w2v
+
+        point_c = point_c.to(torch.float32)
+        # point_c = point_c/point_c[...,-1][...,None]
+        point_c = point_c/np.abs(point_c[...,-1][...,None])
+
+        # point_c = point_c[point_c[...,-1]>0]
+
+        # uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:2]
+        uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:]
+        uv = torch.concat((uv,uv_l[None,...]),dim=0)
+
+        # print((K[None,...] @ point_c[...,None])[...,0][...,-1])
+    mask = (uv[:,:,1]<  H) * (uv[:,:,0]<W) * (uv[:,:,1]>=0) * (uv[:,:,0]>=0) * uv[:,:,-1]>0
+    uv = uv[...,:2]
+
+    tau = prune_thr
+    uv = uv.to(torch.int64)
+    prune_mask = []
+    for i in range(mask.shape[1]):
+        selected_feature = feature_map[mask[:,i],:,uv[mask[:,i],i,1],uv[mask[:,i],i,0]]
+        prune_flag = True
+        if selected_feature is not None:
+            if selected_feature.shape[0]>1:
+            # prune_flag = True
+                for i in range(selected_feature.shape[0]):
+                    for j in range(i+1,selected_feature.shape[0]):
+                        sim_f = feature_sim(selected_feature[i],selected_feature[j])
+                        if sim_f > tau:
+                            prune_flag = False
+        prune_mask.append(prune_flag)
+    prune_mask = np.stack(prune_mask)
+
+    return torch.tensor(prune_mask).to("cuda:0")
+
+
 class GaussianModel:
 
     def setup_functions(self):
@@ -401,6 +495,69 @@ class GaussianModel:
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
+
+    def mvs_prune(self, cams, mvs_prune_threshold, mask=None):
+        if cams!=None:
+            mvs_prune_mask = get_mvs_prune_mask(self._xyz,cams=cams,prune_thr=mvs_prune_threshold, mask=mask)
+            # prune_mask = torch.logical_or(prune_mask, mvs_prune_mask) 
+            print(mvs_prune_mask.sum())
+
+            self.prune_points(mvs_prune_mask)    
+    def occ_prune(self, cam, occ_num):
+        # if args.occ_loss_weight>0:
+            # with torch.no_grad():
+                points = self._xyz.to("cpu")
+                T = cam.T
+                R = cam.R
+                FovY = cam.FoVy
+                FovX = cam.FoVx
+
+                H,W = cam.original_image.shape[1:]
+
+                focal_y =  fov2focal(FovY, H)
+                focal_x =  fov2focal(FovX, W)
+
+                
+                K = torch.tensor(
+                    [
+                        [focal_x, 0, W/2],
+                        [0, focal_y, H/2],
+                        [0, 0, 1],
+                    ],
+                    dtype=torch.float32,
+                )
+
+                w2v = getWorld2View2(R=R,t=T)
+                R_w2v = torch.tensor(w2v[:3,:3], dtype=torch.float32)
+                T_w2v = torch.tensor(w2v[:3,-1], dtype=torch.float32)
+
+                point_c = (R_w2v[None,...] @ points[...,None])[...,0] + T_w2v
+
+                point_c = point_c.to(torch.float32)
+
+                distance_z = point_c[:,-1]
+                # point_c = point_c/point_c[...,-1][...,None]
+                point_c = point_c/torch.abs(point_c[...,-1][...,None])
+
+                # point_c = point_c[point_c[...,-1]>0]
+
+                # uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:2]
+                uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:]
+                # uv = torch.concat((uv,uv_l[None,...]),dim=0)
+
+                # print((K[None,...] @ point_c[...,None])[...,0][...,-1])
+                mask = (uv_l[:,1]<  H) * (uv_l[:,0]<W) * (uv_l[:,1]>=0) * (uv_l[:,0]>=0) * uv_l[:,-1]>0
+                # print("occ mask shape:"+str(mask.shape[0]))
+                valid_distance = distance_z[mask]
+                # valid_distance = distance_z
+                top_k_index = torch.argsort(valid_distance)[:occ_num]
+
+                mask_prune = torch.zeros_like(mask)
+                mask_prune[mask][top_k_index] = 1
+
+                mask_prune = mask_prune.to(bool)
+
+                self.prune_points(mask_prune)    
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter):
         self.xyz_gradient_accum[update_filter] += torch.norm(viewspace_point_tensor.grad[update_filter,:2], dim=-1, keepdim=True)
