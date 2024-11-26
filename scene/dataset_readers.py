@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+ 
 import os
 import sys
 from PIL import Image

@@ -10,3 +10,4 @@ datasets=("fern" "flower" "horns" "orchids" "trex" "room" "leaves" "fortress")
 for dataset in "${datasets[@]}"; do
     bash scripts/train_eval_llff.sh "$base_path" "$dataset" "$num_views" "mcgs"
 done
+ 

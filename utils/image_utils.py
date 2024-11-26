@@ -8,7 +8,7 @@
 #
 # For inquiries contact  george.drettakis@inria.fr
 #
-
+ 
 import torch
 
 def mse(img1, img2):
