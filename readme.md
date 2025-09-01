@@ -4,7 +4,7 @@
 ![method](./assets/method.png)
 
 ![Fern](./assets/fern.gif)
-![horns](./assets/horns.gif)
+
 ## Installation
 Install the following dependency
 ```
