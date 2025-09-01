@@ -864,19 +864,15 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
                 point_ = point_
                 color_ = color_
                 
-            if dataset == "DTU":
-                pcd_shape = (topk_(pcd_l.points, 100, 0)[-1] + topk_(-pcd_l.points, 100, 0)[-1])
-                num_pts = 10_00
-                xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-pcd_l.points, 100, 0)[-1] # - 0.15 * pcd_shape
-            else:
-                num_pts = 1000 ## 10000 1000
-                print("num random points:"+str(num_pts))
-                xyz = np.random.random((num_pts, 3)) * (np.max(pcd_l.points,axis=0)-np.min(pcd_l.points,axis=0)) * 1.3 + np.min(pcd_l.points,axis=0) - (np.max(pcd_l.points,axis=0)-np.min(pcd_l.points,axis=0)) * 0.15# 1.3
+
+            num_pts = 1000
+            print("num random points:"+str(num_pts))
+            xyz = np.random.random((num_pts, 3)) * (np.max(pcd_l.points,axis=0)-np.min(pcd_l.points,axis=0)) * 1.3 + np.min(pcd_l.points,axis=0) - (np.max(pcd_l.points,axis=0)-np.min(pcd_l.points,axis=0)) * 0.15# 1.3
 
 
             ### added without influence
             box_bound, ct_bound = compute_bound(xyz)
-            oct_resolution = 32 # 128 32
+            oct_resolution = 32
             oct = octree(point_, box_bound, resolution=oct_resolution)  
             num_ori = len(oct.point_cloud)  
             point_ = oct.add_points(xyz,resolution=oct_resolution)
