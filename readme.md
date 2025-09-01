@@ -19,8 +19,9 @@ pip install ./LightGlue
 ```
 
 ## Dataset
-Download Blender Dataset from [Blender](https://github.com/bmild/nerf)  
+Download Blender Dataset from [Blender](https://github.com/bmild/nerf)
 Download LLFF Dataset from [LLFF](https://github.com/Fyusion/LLFF)
+Download MipNeRF360 Dataset from [360](https://jonbarron.info/mipnerf360)
 ## Usage
 ### LLFF Dataset
 ```
@@ -31,6 +32,10 @@ bash ./scripts/llff.sh
 bash ./scripts/blender.sh
 ```
  
+### MipNeRF360 Dataset
+```
+bash ./scripts/360_12.sh
+```
 ### Citation
 ```
 @article{xiao2024mcgs,
