@@ -111,7 +111,7 @@ def get_mvs_prune_mask(points , cams, prune_thr=0.8, mask=None, chunk_size = 200
 
         if len(max_sims)>0:
 
-            prune_mask = np.stack(max_sims)<np.stack(max_sims).mean() - 0.1
+            prune_mask = np.stack(max_sims)<np.stack(max_sims).mean()
         else:
             prune_mask = np.array([])
         prune_masks = np.concatenate((prune_masks, prune_mask), axis=0)
