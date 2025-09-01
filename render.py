@@ -72,10 +72,9 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
 
     fps = 30
-    # video_path = "output.avi"
     height, width = views[0].image_height, views[0].image_width
 
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')  # 编码格式
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')  
     writer = cv2.VideoWriter(os.path.join(render_path, 'video.avi'), fourcc, fps, (width, height))
     writerD = cv2.VideoWriter(os.path.join(render_path, 'videoD.avi'), fourcc, fps, (width, height))
 
@@ -97,8 +96,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         save_rendering = (torch.concat([rendering[2,...][None,...], rendering[1,...][None,...], rendering[0,...][None,...]], dim=0).permute(1, 2, 0) * 255).clamp_(0, 255).cpu().numpy()
         writer.write(save_rendering.astype('uint8'))
 
-
-        # if args.render_depth:
         if True:
 
             depth_map = vis_depth(rendering_pkg['depth'][0].detach().cpu().numpy())
