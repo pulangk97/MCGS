@@ -71,10 +71,6 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(gts_path, exist_ok=True)
 
 
-    # writer = imageio.get_writer(os.path.join(render_path, 'video.mp4'), fps=30)
-    # writerD = imageio.get_writer(os.path.join(render_path, 'videoD.mp4'), fps=30)\
-
-
     fps = 30
     # video_path = "output.avi"
     height, width = views[0].image_height, views[0].image_width
@@ -84,36 +80,20 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     writerD = cv2.VideoWriter(os.path.join(render_path, 'videoD.avi'), fourcc, fps, (width, height))
 
 
-    # writerN = imageio.get_writer(os.path.join(render_path, 'videoN.mp4'), fps=30)
-
+ 
 
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
 
-        if_eval_efficiency=False
-        if if_eval_efficiency == True:
-            save_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/MCGS/output/efficiency_eval"
-            print("evaluate efficiency once!")
-            start_time = time.time()
-            rendering_pkg = render(view, gaussians, pipeline, background)
-            end_time = time.time()
-            print(f"rendering time: {end_time - start_time} s")
-            with open(save_path+"/efficiency.txt", "a") as file:
-                file.write(f"Gaussians:: {gaussians.get_xyz.shape[0]} ")
-                file.write(f"render time(s): {end_time - start_time}\n")
-            assert False, print("evaluate efficiency done!")
-            
-        # render_pkg = render(view, gaussians, pipeline, background, inference=True, if_eval_efficiency=True)
-        else:
-            rendering_pkg = render(view, gaussians, pipeline, background)
-        # rendering_pkg = render(view, gaussians, pipeline, background)
+
+        rendering_pkg = render(view, gaussians, pipeline, background)
+
 
         rendering = rendering_pkg["render"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
 
-        # print(rendering.shape)
-        # print(rendering)
+
         save_rendering = (torch.concat([rendering[2,...][None,...], rendering[1,...][None,...], rendering[0,...][None,...]], dim=0).permute(1, 2, 0) * 255).clamp_(0, 255).cpu().numpy()
         writer.write(save_rendering.astype('uint8'))
 

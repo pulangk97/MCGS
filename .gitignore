@@ -1,6 +1,7 @@
 # 忽略 ./output 目录及其所有内容
 /output/
 
+/.vscode/
 # 忽略 ./data 目录及其所有内容
 /data/
 
