@@ -12,7 +12,7 @@ cd submodules
 git clone git@github.com:ashawkey/diff-gaussian-rasterization.git --recursive
 git clone https://gitlab.inria.fr/bkerbl/simple-knn.git
 
-
+cd ..
 pip install ./submodules/diff-gaussian-rasterization  
 pip install ./submodules/simple-knn  
 pip install ./LightGlue
