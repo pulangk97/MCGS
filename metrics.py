@@ -50,7 +50,7 @@ def evaluate(model_paths):
             per_view_dict_polytopeonly[scene_dir] = {}
 
             test_dir = Path(scene_dir) / "test"
-
+            # print(test_dir)
             for method in os.listdir(test_dir):
                 print("Method:", method)
 

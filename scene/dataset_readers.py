@@ -23,8 +23,9 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 import torch.nn.functional as F
-
-def mvs_prune(train_cam_infos, points,  res, prune_thr = 0.85):
+from tqdm import tqdm
+from utils.camera_utils import get_img_feature
+def mvs_prune(train_cam_infos , points,  res , prune_thr=0.8, mask=None, chunk_size = 2000):
 
     def feature_sim(feature0,feature1):
         f0 = feature0
@@ -32,41 +33,8 @@ def mvs_prune(train_cam_infos, points,  res, prune_thr = 0.85):
         sim_map = torch.sum(f0*f1,dim=0)/(torch.norm(f0,dim=0)*torch.norm(f1,dim=0))
         return sim_map
 
-    def get_img_feature(img, model, layeridx = [2,6,40,84]):
-        def get_featuremap(layer_output, image_shape, idx=[2,6,40,84], cont_rgb = True ):
-            featuremap = torch.tensor([])
-            for i in idx:
-                out = layer_output[i]
-                for key, value in out.items():
-                    scale_factor = (image_shape[0]/value.shape[-2],image_shape[1]/value.shape[-1])
-                    output_tensor = F.interpolate(value, scale_factor=scale_factor, mode='bilinear', align_corners=True)
 
-                    featuremap = torch.concat((featuremap, output_tensor), dim=1)
-
-            return featuremap
-
-        def forward_hook(module, input, output):
-
-            class_name = module.__class__.__name__
-            data = { class_name: output
-
-            }
-            layer_outputs.append(data)
-
-        layer_outputs = []
-
-        for name, layer in model.named_modules():
-            layer.register_forward_hook(forward_hook)
-
-        model = model
-        output = model(img)
-        shape = img.shape[-2:]
-        featuremap = get_featuremap(layer_output=layer_outputs, image_shape=shape, idx=layeridx)    
-        return featuremap.squeeze()
-
-
-    resnet50 = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
-    feature_extract_model = resnet50
+    prune_masks = np.array([])
 
     images_origin = [np.array(infos.image) for infos in train_cam_infos]
     orig_h, orig_w = images_origin[0].shape[:2]
@@ -85,7 +53,6 @@ def mvs_prune(train_cam_infos, points,  res, prune_thr = 0.85):
     focal_y =  fov2focal(FovY[0], H)
     focal_x =  fov2focal(FovX[0], W)
 
-    
     K = torch.tensor(
         [
             [focal_x, 0, W/2],
@@ -93,49 +60,72 @@ def mvs_prune(train_cam_infos, points,  res, prune_thr = 0.85):
             [0, 0, 1],
         ],
         dtype=torch.float32,
-    ) 
+    )
+
+    resnet50 = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
+    feature_extract_model = resnet50
     feature_map = torch.tensor([])
-    uv = torch.tensor([])
-    for idx, img in enumerate(images):
-        
+
+    for idx, img in (enumerate(images)):
+
         img_feature = get_img_feature(img[None,...],model=feature_extract_model)
+
         feature_map = torch.concat((feature_map,img_feature[None,...]),dim=0)
-        w2v = getWorld2View2(R=R[idx].numpy(),t=T[idx].numpy())
-        R_w2v = torch.tensor(w2v[:3,:3], dtype=torch.float32)
-        T_w2v = torch.tensor(w2v[:3,-1], dtype=torch.float32) 
 
-        point_c = (R_w2v[None,...] @ points[...,None])[...,0] + T_w2v
+    for i in range(0, points.shape[0], chunk_size):
+        points_chunk = points[i:i+chunk_size]
 
-        point_c = point_c.to(torch.float32)
+        uv = torch.tensor([])
+        for idx, img in enumerate(images):
 
-        point_c = point_c/np.abs(point_c[...,-1][...,None])
+            w2v = getWorld2View2(R=R[idx].numpy(),t=T[idx].numpy())
+            R_w2v = torch.tensor(w2v[:3,:3], dtype=torch.float32)
+            T_w2v = torch.tensor(w2v[:3,-1], dtype=torch.float32)
 
-        uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:]
-        uv = torch.concat((uv,uv_l[None,...]),dim=0)
+            point_c = (R_w2v[None,...] @ points_chunk[...,None])[...,0] + T_w2v
+
+            point_c = point_c.to(torch.float32)
+            point_c = point_c/np.abs(point_c[...,-1][...,None])
+
+            uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:]
+            uv = torch.concat((uv,uv_l[None,...]),dim=0)
+
+        mask_p = (uv[:,:,1]<  H) * (uv[:,:,0]<W) * (uv[:,:,1]>=0) * (uv[:,:,0]>=0) * uv[:,:,-1]>0
+        uv = uv[...,:2]
+
+        tau = prune_thr
+        uv = uv.to(torch.int64)
+        prune_mask = []
+        max_sims = []
+        for i in range(mask_p.shape[1]):
+            ### feature convolution
+            max_sim = 0
+            ###
+            selected_feature = feature_map[mask_p[:,i],:,uv[mask_p[:,i],i,1],uv[mask_p[:,i],i,0]]
+            prune_flag = True
+            if selected_feature is not None:
+                if selected_feature.shape[0]>1:
+                    for f_i in range(selected_feature.shape[0]):
+                        for j in range(f_i+1,selected_feature.shape[0]):
+                            sim_f = feature_sim(selected_feature[f_i],selected_feature[j])
+
+                            if sim_f > tau:
+                                prune_flag = False
+                            
+                            if sim_f > max_sim:
+                                max_sim = sim_f
+            max_sims.append(max_sim)
+            prune_mask.append(prune_flag)
 
 
-    mask = (uv[:,:,1]<  H) * (uv[:,:,0]<W) * (uv[:,:,1]>=0) * (uv[:,:,0]>=0) * uv[:,:,-1]>0
-    uv = uv[...,:2]
+        if len(max_sims)>0:
+            prune_mask = np.stack(max_sims)<np.stack(max_sims).mean()
+        else:
+            prune_mask = np.array([])
+        prune_masks = np.concatenate((prune_masks, prune_mask), axis=0)
 
 
-
-    tau = prune_thr
-    uv = uv.to(torch.int64)
-    prune_mask = []
-    for i in range(mask.shape[1]):
-        selected_feature = feature_map[mask[:,i],:,uv[mask[:,i],i,1],uv[mask[:,i],i,0]]
-        prune_flag = True
-        if selected_feature is not None:
-            if selected_feature.shape[0]>1:
-                for i in range(selected_feature.shape[0]):
-                    for j in range(i+1,selected_feature.shape[0]):
-                        sim_f = feature_sim(selected_feature[i],selected_feature[j])
-                        if sim_f > tau:
-                            prune_flag = False
-        prune_mask.append(prune_flag)
-    prune_mask = np.stack(prune_mask)
-
-    return prune_mask
+    return torch.tensor(prune_masks).to(bool)
 
 
 
@@ -239,6 +229,7 @@ def get_sparse_correspondences(train_cam_infos, res, tau = 1000):
     orig_h, orig_w = images_origin[0].shape[:2]
 
     resolution = (int(orig_w / res), int(orig_h / res))
+
     images = [PILtoTorch(infos.image, resolution) for infos in train_cam_infos]     
 
     T = [torch.tensor(infos.T,dtype = torch.float) for infos in train_cam_infos]
@@ -256,7 +247,6 @@ def get_sparse_correspondences(train_cam_infos, res, tau = 1000):
 
     focal_y =  fov2focal(FovY[0], H)
     focal_x =  fov2focal(FovX[0], W)
-
 
     K = torch.tensor(
         [
@@ -291,7 +281,7 @@ def get_sparse_correspondences(train_cam_infos, res, tau = 1000):
         mid = copy.deepcopy(pix1[...,0])
         pix1[...,0] = copy.deepcopy(pix1[...,1])
         pix1[...,1] = mid
-        # score = matches01["scores"]
+
 
         pix0 = torch.tensor(pix0)
         pix1 = torch.tensor(pix1)
@@ -313,6 +303,54 @@ def get_sparse_correspondences(train_cam_infos, res, tau = 1000):
     return point_cloud, color
 
 
+
+def generate_spiral_path(poses, bounds, fix_rot, n_frames=120, n_rots=1, zrate=.5):
+    def poses_avg(poses):
+        """New pose using average position, z-axis, and up vector of input poses."""
+        position = poses[:, :3, 3].mean(0)
+        z_axis = poses[:, :3, 2].mean(0)
+        up = poses[:, :3, 1].mean(0)
+        cam2world = viewmatrix(z_axis, up, position)
+        return cam2world
+
+    def viewmatrix(lookdir, up, position, subtract_position=False):
+        """Construct lookat view matrix."""
+        vec2 = normalize((lookdir - position) if subtract_position else lookdir)
+        vec0 = normalize(np.cross(up, vec2))
+        vec1 = normalize(np.cross(vec2, vec0))
+        m = np.stack([vec0, vec1, vec2, position], axis=1)
+        return m
+
+    def normalize(x):
+        """Normalization helper function."""
+        return x / np.linalg.norm(x)
+
+    """Calculates a forward facing spiral path for rendering."""
+    # Find a reasonable 'focus depth' for this dataset as a weighted average
+    # of near and far bounds in disparity space.
+    close_depth, inf_depth = bounds.min() * .9, bounds.max() * 5.
+    dt = .75
+    focal = 1 / (((1 - dt) / close_depth + dt / inf_depth))
+
+    # Get radii for spiral path using 90th percentile of camera positions.
+    positions = poses[:, :3, 3]
+    radii = np.percentile(np.abs(positions), 90, 0)
+    radii = np.concatenate([radii, [1.]])
+
+    print(focal, radii)
+
+    # Generate poses for spiral path.
+    render_poses = []
+    cam2world = poses_avg(poses)
+    up = poses[:, :3, 1].mean(0)
+    for theta in np.linspace(0., 2. * np.pi * n_rots, n_frames, endpoint=False):
+        t = radii * [np.cos(theta), np.sin(theta), np.sin(theta * zrate), 1.]
+        position = cam2world @ t
+        lookat = cam2world @ [0, 0, focal, 1.]
+        z_axis = -position + lookat
+        render_poses.append(viewmatrix(z_axis, up, position))
+    render_poses = np.stack(render_poses, axis=0)
+    return render_poses
 
 
 
@@ -501,6 +539,7 @@ class SceneInfo(NamedTuple):
     point_cloud: BasicPointCloud
     train_cameras: list
     test_cameras: list
+    render_cameras: list
     nerf_normalization: dict
     ply_path: str
 
@@ -548,7 +587,7 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
             focal_length_x = intr.params[0]
             FovY = focal2fov(focal_length_x, height)
             FovX = focal2fov(focal_length_x, width)
-        elif intr.model=="PINHOLE":
+        elif intr.model=="PINHOLE" or intr.model=="OPENCV":
             focal_length_x = intr.params[0]
             focal_length_y = intr.params[1]
             FovY = focal2fov(focal_length_y, height)
@@ -566,6 +605,52 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         cam_infos.append(cam_info)
     sys.stdout.write('\n')
     return cam_infos
+from einops import einsum, rearrange, reduce, repeat
+def get_fov(intrinsics):
+    intrinsics_inv = intrinsics.inverse()
+
+    def process_vector(vector):
+        vector = torch.tensor(vector, dtype=torch.float32, device=intrinsics.device)
+        vector = einsum(intrinsics_inv, vector, "b i j, j -> b i")
+        return vector / vector.norm(dim=-1, keepdim=True)
+
+    left = process_vector([0, 0.5, 1])
+    right = process_vector([1, 0.5, 1])
+    top = process_vector([0.5, 0, 1])
+    bottom = process_vector([0.5, 1, 1])
+    fov_x = (left * right).sum(dim=-1).acos()
+    fov_y = (top * bottom).sum(dim=-1).acos()
+    return fov_x.numpy(), fov_y.numpy()
+
+def get_projection_matrix(
+    near,
+    far,
+    fov_x,
+    fov_y,
+):
+    """Maps points in the viewing frustum to (-1, 1) on the X/Y axes and (0, 1) on the Z
+    axis. Differs from the OpenGL version in that Z doesn't have range (-1, 1) after
+    transformation and that Z is flipped.
+    """
+    tan_fov_x = (0.5 * fov_x).tan()
+    tan_fov_y = (0.5 * fov_y).tan()
+
+    top = tan_fov_y * near
+    bottom = -top
+    right = tan_fov_x * near
+    left = -right
+
+    (b,) = near.shape
+    result = torch.zeros((b, 4, 4), dtype=torch.float32, device=near.device)
+    result[:, 0, 0] = 2 * near / (right - left)
+    result[:, 1, 1] = 2 * near / (top - bottom)
+    result[:, 0, 2] = (right + left) / (right - left)
+    result[:, 1, 2] = (top + bottom) / (top - bottom)
+    result[:, 3, 2] = 1
+    result[:, 2, 2] = far / (far - near)
+    result[:, 2, 3] = -(far * near) / (far - near)
+    return result
+
 
 def fetchPly(path):
     plydata = PlyData.read(path)
@@ -593,7 +678,8 @@ def storePly(path, xyz, rgb):
     ply_data.write(path)
 
 
-def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_pcd = False, dense_pcd = False, add_rand = False, if_prune = False,  llffhold=8, N_sparse=-1, resolution=1):
+def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_pcd = False, dense_pcd = False, add_rand = False, if_prune = False,  llffhold=8, N_sparse=-1, resolution=1, tau = 1000, mvs_initial = 0.85, render_path= False):
+
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -609,12 +695,14 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
     reading_dir = "images" if images == None else images
 
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics, images_folder=os.path.join(path, reading_dir))
+
     cam_infos = sorted(cam_infos_unsorted.copy(), key = lambda x : x.image_name)
     if eval:
         print("Dataset Type: ", dataset)
         if dataset == "LLFF":
             train_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold != 0]
             eval_cam_infos = [c for idx, c in enumerate(cam_infos) if idx % llffhold == 0]
+            test_cam_infos = eval_cam_infos
             if N_sparse > 0:
                 idx = list(range(len(train_cam_infos)))
                 idx_train = np.linspace(0, len(train_cam_infos) - 1, N_sparse)
@@ -622,7 +710,6 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
                 idx_test = [i for i in idx if i not in idx_train] 
                 train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in idx_train]
                 test_cam_infos = eval_cam_infos
-
         else:
             raise NotImplementedError
     else:
@@ -657,7 +744,6 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
             pcd_shape = (topk_(xyz, 1, 0)[-1] + topk_(-xyz, 1, 0)[-1])
             num_pts = int(pcd_shape.max() * 50)
             xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-xyz, 20, 0)[-1]
-
         print(f"Generating random point cloud ({num_pts})...")
 
         shs = np.random.random((num_pts, 3)) / 255.0
@@ -673,20 +759,25 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
         print("using MVS for initial point cloud!")
     elif sparse_pcd:
         print('Init sparse matched point cloud.')
-        ply_path = os.path.join(path, "sparse/0/points3D_sparse.ply")
+        ply_path = os.path.join(path, f"sparse/0/points3D_sparse_{N_sparse}.ply")
         bin_path = os.path.join(path, "sparse/0/points3D.bin")
         txt_path = os.path.join(path, "sparse/0/points3D.txt")
 
-        point_, color_ = get_sparse_correspondences(train_cam_infos,resolution, tau=1000)
-        num_pts = point_.shape[0]
 
 
-        pcd = BasicPointCloud(points=point_, colors=color_, normals=np.zeros((num_pts, 3)))
+        try:
+            pcd = fetchPly(ply_path)
+            print("fetch points from:"+ply_path)
+        except:
+            point_, color_ = get_sparse_correspondences(train_cam_infos,resolution, tau=tau)
+            num_pts = point_.shape[0]
 
 
+            pcd = BasicPointCloud(points=point_, colors=color_, normals=np.zeros((num_pts, 3)))
 
-        storePly(ply_path, point_, color_ * 255)
-        print("using sparse matcher for initial point cloud!")
+            storePly(ply_path, point_, color_ * 255)
+            print("using sparse matcher for initial point cloud!")
+
 
     elif dense_pcd:
         ply_path = os.path.join(path, "sparse/0/points3D.ply")
@@ -745,6 +836,24 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
             print("using COLMAP for initial point cloud!")
 
     if add_rand:
+            ## add random according to sparse points range
+            ply_path_l = os.path.join(path, "sparse/0/points3D.ply")
+            bin_path_l = os.path.join(path, "sparse/0/points3D.bin")
+            txt_path_l = os.path.join(path, "sparse/0/points3D.txt")
+            if not os.path.exists(ply_path_l):
+                print("Converting point3d.bin to .ply, will happen only the first time you open the scene.")
+                try:
+                    xyz_l, rgb_l, _ = read_points3D_binary(bin_path_l)
+                except:
+                    xyz_l, rgb_l, _ = read_points3D_text(txt_path_l)
+                storePly(ply_path_l, xyz_l, rgb_l)
+            try:
+                pcd_l = fetchPly(ply_path_l)
+            except:
+                pcd_l = None
+            print("using COLMAP for random points range!")
+
+
             # # ## random init in blank place
             point_ = pcd.points
             color_ = pcd.colors
@@ -755,23 +864,24 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
                 point_ = point_
                 color_ = color_
                 
-            pcd_shape = (topk_(point_, 1, 0)[-1] + topk_(-point_, 1, 0)[-1])
+            if dataset == "DTU":
+                pcd_shape = (topk_(pcd_l.points, 100, 0)[-1] + topk_(-pcd_l.points, 100, 0)[-1])
+                num_pts = 10_00
+                xyz = np.random.random((num_pts, 3)) * pcd_shape * 1.3 - topk_(-pcd_l.points, 100, 0)[-1] # - 0.15 * pcd_shape
+            else:
+                num_pts = 1000
+                print("num random points:"+str(num_pts))
+                xyz = np.random.random((num_pts, 3)) * (np.max(pcd_l.points,axis=0)-np.min(pcd_l.points,axis=0)) * 1.3 + np.min(pcd_l.points,axis=0) - (np.max(pcd_l.points,axis=0)-np.min(pcd_l.points,axis=0)) * 0.15# 1.3
 
-            num_pts = 1000 
-            print("num random points:"+str(num_pts))
 
-            xyz = np.random.random((num_pts, 3)) * (np.max(point_,axis=0)-np.min(point_,axis=0)) * 1.3 + np.min(point_,axis=0) - (np.max(point_,axis=0)-np.min(point_,axis=0)) * 0.15# 1.3
-            
-
+            ### added without influence
             box_bound, ct_bound = compute_bound(xyz)
-            oct_resolution = 32 
+            oct_resolution = 32
             oct = octree(point_, box_bound, resolution=oct_resolution)  
             num_ori = len(oct.point_cloud)  
             point_ = oct.add_points(xyz,resolution=oct_resolution)
 
             num_added = len(point_) - num_ori
-
-
 
             shs = np.random.random((num_added, 3)) / 255.0
 
@@ -798,7 +908,9 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
             color_ = color_
             normal_ = normal_
         ini_num = len(point_)
-        prune_mask = mvs_prune(train_cam_infos,point_,res = resolution)
+
+        prune_mask = mvs_prune(train_cam_infos,point_,res = resolution, prune_thr=mvs_initial)
+
         keep_mask = torch.logical_not(torch.tensor(prune_mask))
         point_ = point_[keep_mask]
         color_ = color_[keep_mask]
@@ -812,13 +924,67 @@ def readColmapSceneInfo(path, images, dataset, eval, rand_pcd, mvs_pcd, sparse_p
         ply_path = os.path.join(path, "sparse/0/points3D_prune.ply")
         storePly(ply_path, point_, color_ * 255)
 
+
+    if render_path:
+
+        factor = 8
+        with open(os.path.join(path, 'poses_bounds.npy'),
+                            'rb') as fp:
+            poses_arr = np.load(fp)
+        poses = poses_arr[:, :-2].reshape([-1, 3, 5])
+        bounds = poses_arr[:, -2:]
+
+        # Pull out focal length before processing poses.
+        focal = poses[0, -1, -1] / factor
+
+        # Correct rotation matrix ordering (and drop 5th column of poses).
+        fix_rotation = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 0],
+            [0, 0, -1, 0],
+            [0, 0, 0, 1],
+        ],
+                                dtype=np.float32)
+
+        poses = poses[:, :3, :4] @ fix_rotation
+
+        # Rescale according to a default bd factor.
+        scale = 1. / (bounds.min() * .75)
+        poses[:, :3, 3] *= scale
+        bounds *= scale
+
+        width = int(train_cam_infos[0].width/factor)
+        height = int(train_cam_infos[0].height/factor)
+        FovY = focal2fov(focal, height)
+        FovX = focal2fov(focal, width)
+        # Center and scale poses.
+        camtoworlds = poses
+        render_cam_infos = []
+        render_poses = generate_spiral_path(camtoworlds, bounds, fix_rotation, n_frames=120)
+
+        for i, render_pose in enumerate(render_poses):
+            # get the world-to-camera transform and set R, T
+            pose = np.eye(4, dtype=np.float32)
+            pose[:3] = render_pose
+            w2c = np.linalg.inv(pose)
+            R = np.transpose(w2c[:3,:3])  # R is stored transposed due to 'glm' in CUDA code
+            T = w2c[:3, 3]
+            cam_info = CameraInfo(uid=i, R=R, T=T, FovY=FovY, FovX=FovX, image=train_cam_infos[0].image,
+                                    image_path=None, image_name=f"{i}", width=width, height=height)
+            render_cam_infos.append(cam_info)
+        
+    
+    else:
+        render_cam_infos = []
         
 
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
+                           render_cameras=render_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
+
     return scene_info
 
 
@@ -865,7 +1031,7 @@ def readCamerasFromTransforms(path, transformsfile, white_background, extension=
             
     return cam_infos
 
-def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = False, add_rand = False, if_prune = False, llffhold=8, N_sparse=-1, extension=".png" , resolution = -1):
+def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = False, add_rand = False, if_prune = False, llffhold=8, N_sparse=-1, extension=".png" , resolution = -1, tau=0.0001, mvs_initial=0.85):
     print("Reading Training Transforms")
     train_cam_infos = readCamerasFromTransforms(path, "transforms_train.json", white_background, extension)
     print("Reading Test Transforms")
@@ -874,6 +1040,7 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = F
     if eval:
         if N_sparse > 0:
             train_cam_infos = [c for idx, c in enumerate(train_cam_infos) if idx in [2, 16, 26, 55, 73, 76, 86, 93]]
+            train_cam_infos = train_cam_infos[:N_sparse]
         eval_cam_infos = [c for idx, c in enumerate(test_cam_infos) if idx % llffhold == 0]
         # test_cam_infos = test_cam_infos
         if N_sparse > 0:
@@ -897,7 +1064,6 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = F
     if rand_pcd: # or not os.path.exists(ply_path):
         # Since this data set has no colmap data, we start with random points
         num_pts = 10_000
-        # num_pts = 500
         print(f"Generating random point cloud ({num_pts})...")
         
         # We create random points inside the bounds of the synthetic Blender scenes
@@ -908,11 +1074,11 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = F
         storePly(ply_path, xyz, SH2RGB(shs) * 255)
     elif sparse_pcd:
         print('Init sparse matched point cloud.')
-        ply_path = os.path.join(path, "points3D_sparse.ply")
+        ply_path = os.path.join(path, f"points3D_sparse_{N_sparse}.ply")
         bin_path = os.path.join(path, "points3D.bin")
         txt_path = os.path.join(path, "points3D.txt")
-
-        point_, color_ = get_sparse_correspondences(train_cam_infos,resolution, tau=0.0001)
+        
+        point_, color_ = get_sparse_correspondences(train_cam_infos,resolution, tau=tau)
         num_pts = point_.shape[0]
         pcd = BasicPointCloud(points=point_, colors=color_, normals=np.zeros((num_pts, 3)))
 
@@ -965,7 +1131,7 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = F
                 color_ = color_
                 normal_ = normal_
             ini_num = len(point_)
-            prune_mask = mvs_prune(train_cam_infos,point_,res = resolution)
+            prune_mask = mvs_prune(train_cam_infos,point_,res = resolution,prune_thr=mvs_initial)
             keep_mask = torch.logical_not(torch.tensor(prune_mask))
             # keep_mask = prune_mask
 
@@ -980,11 +1146,12 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = F
             print("original number of points:"+str(ini_num))
             print("prune points:"+str(ini_num-remain_num))
 
-
+    render_cam_infos = []
 
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
+                           render_cameras = render_cam_infos,
                            nerf_normalization=nerf_normalization,
                            ply_path=ply_path)
     return scene_info
@@ -992,5 +1159,5 @@ def readNerfSyntheticInfo(path, white_background, eval, rand_pcd, sparse_pcd = F
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,
-    "Blender" : readNerfSyntheticInfo
+    "Blender" : readNerfSyntheticInfo,
 }

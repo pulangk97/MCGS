@@ -60,11 +60,17 @@ class ModelParams(ParamGroup):
         self.sparse_pcd = False
         self.dense_pcd = False
         self.add_rand = False
-        self.if_prune = False
+        self.if_prune = False # True
         self.train_mvs_prune = False
 
         self.if_TV = False
     
+
+
+        self.mvs_prune_threshold_initial = 0.7 # 0.7
+        self.tau = 1000
+
+
         self.n_sparse = -1
         super().__init__(parser, "Loading Parameters", sentinel)
 
@@ -102,18 +108,25 @@ class OptimizationParams(ParamGroup):
         self.prune_threshold = 0.005
         self.random_background = False
 
-        self.mvs_prune_threshold = 0.8
+        self.mvs_prune_threshold = 0.8 
+        # self.mvs_prune_iterval = 3000
         self.mvs_prune_iterval = 3000
-        self.mvs_prune_end = 10000 
+        self.mvs_prune_end = 10000  # 10000
         self.mvs_prune_start = 0
 
         self.occ_reg_weight = 0.00
 
         self.start_point = "[0,0,64,128]" 
         self.mvs_prune_thresholds = "[0.75, 0.8, 0.85, 0.85]" 
+        # self.mvs_prune_thresholds = "[0.9, 0.9, 0.9, 0.9]" 
 
-        self.tv_weight = 0.0003 
-        self.tv_start = 9000 
+
+        ## for random init
+        # self.tv_weight = 0.003 # 0.0003
+        # self.tv_start = 5000 # 9000
+
+        self.tv_weight = 0.03 # 0.0003
+        self.tv_start = 9000 # 9000
 
 
         super().__init__(parser, "Optimization Parameters")

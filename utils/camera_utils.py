@@ -38,20 +38,20 @@ def get_img_feature(img, model, if_cont_rgb=False, layeridx = [2,6,40,84]): #[2,
 
         }
         layer_outputs.append(data)
+    with torch.no_grad():
+        layer_outputs = []
 
-    layer_outputs = []
+        for name, layer in model.named_modules():
+            layer.register_forward_hook(forward_hook)
 
-    for name, layer in model.named_modules():
-        layer.register_forward_hook(forward_hook)
-
-    model = model
-    output = model(img)
-    shape = img.shape[-2:]
-    featuremap = get_featuremap(layer_output=layer_outputs, image_shape=shape, idx=layeridx)   
-    if if_cont_rgb == True:
-        
-        featuremap = torch.concat((img[None,...],featuremap),dim=1) 
-    featuremap = featuremap/torch.norm(featuremap,dim=1)
+        model = model
+        output = model(img)
+        shape = img.shape[-2:]
+        featuremap = get_featuremap(layer_output=layer_outputs, image_shape=shape, idx=layeridx)   
+        if if_cont_rgb == True:
+            
+            featuremap = torch.concat((img[None,...],featuremap),dim=1) 
+        featuremap = featuremap/torch.norm(featuremap,dim=1)
     return featuremap.squeeze()
 
 
@@ -83,8 +83,8 @@ def loadCam(args, id, cam_info, resolution_scale, feature_extract_model):
     loaded_mask = None
     
     ############# get image feature from gt image by DINO ###############
-    # resnet50 = torch.hub.load('facebookresearch/dino:main', 'dino_resnet50')
     if feature_extract_model!=None:
+
         gt_feature = get_img_feature(gt_image[None,...], model = feature_extract_model)
     else:
         gt_feature = None

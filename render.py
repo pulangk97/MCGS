@@ -23,6 +23,7 @@ from gaussian_renderer import GaussianModel
 import numpy as np
 import matplotlib.cm as cm
 import cv2
+import imageio
 def weighted_percentile(x, w, ps, assume_sorted=False):
     """Compute the weighted percentile(s) of a single vector."""
     x = x.reshape([-1])
@@ -61,7 +62,7 @@ def vis_depth(depth):
 
 
     return np.uint8(colorized[..., ::-1] * 255)
-
+import time
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
@@ -69,25 +70,70 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
 
+
+    # writer = imageio.get_writer(os.path.join(render_path, 'video.mp4'), fps=30)
+    # writerD = imageio.get_writer(os.path.join(render_path, 'videoD.mp4'), fps=30)\
+
+
+    fps = 30
+    # video_path = "output.avi"
+    height, width = views[0].image_height, views[0].image_width
+
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')  # 编码格式
+    writer = cv2.VideoWriter(os.path.join(render_path, 'video.avi'), fourcc, fps, (width, height))
+    writerD = cv2.VideoWriter(os.path.join(render_path, 'videoD.avi'), fourcc, fps, (width, height))
+
+
+    # writerN = imageio.get_writer(os.path.join(render_path, 'videoN.mp4'), fps=30)
+
+
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
 
-        rendering_pkg = render(view, gaussians, pipeline, background)
+        if_eval_efficiency=False
+        if if_eval_efficiency == True:
+            save_path = "/media/xyr/data11/code/3DGS/gaussian-splatting-wdepth/gaussian-splatting-diff-depth/MCGS/output/efficiency_eval"
+            print("evaluate efficiency once!")
+            start_time = time.time()
+            rendering_pkg = render(view, gaussians, pipeline, background)
+            end_time = time.time()
+            print(f"rendering time: {end_time - start_time} s")
+            with open(save_path+"/efficiency.txt", "a") as file:
+                file.write(f"Gaussians:: {gaussians.get_xyz.shape[0]} ")
+                file.write(f"render time(s): {end_time - start_time}\n")
+            assert False, print("evaluate efficiency done!")
+            
+        # render_pkg = render(view, gaussians, pipeline, background, inference=True, if_eval_efficiency=True)
+        else:
+            rendering_pkg = render(view, gaussians, pipeline, background)
+        # rendering_pkg = render(view, gaussians, pipeline, background)
+
         rendering = rendering_pkg["render"]
         gt = view.original_image[0:3, :, :]
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
 
-        if args.render_depth:
+        # print(rendering.shape)
+        # print(rendering)
+        save_rendering = (torch.concat([rendering[2,...][None,...], rendering[1,...][None,...], rendering[0,...][None,...]], dim=0).permute(1, 2, 0) * 255).clamp_(0, 255).cpu().numpy()
+        writer.write(save_rendering.astype('uint8'))
+
+
+        # if args.render_depth:
+        if True:
 
             depth_map = vis_depth(rendering_pkg['depth'][0].detach().cpu().numpy())
             np.save(os.path.join(render_path, view.image_name + '_depth.npy'), rendering_pkg['depth'][0].detach().cpu().numpy())
             cv2.imwrite(os.path.join(render_path, view.image_name + '_depth.png'), depth_map)
+            writerD.write(depth_map)
 
 
-def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool):
+def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParams, skip_train : bool, skip_test : bool, skip_render = True, scene_id = None):
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
-        scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
+        if scene_id == None:
+            scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
+        else:
+            scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False, scene_id=scene_id)
 
 
         bg_color = [1,1,1] if dataset.white_background else [0, 0, 0]
@@ -98,6 +144,9 @@ def render_sets(dataset : ModelParams, iteration : int, pipeline : PipelineParam
 
         if not skip_test:
              render_set(dataset.model_path, "test", scene.loaded_iter, scene.getTestCameras(), gaussians, pipeline, background)
+        if not skip_render:
+            render_set(dataset.model_path, "render", scene.loaded_iter, scene.getRenderCameras(), gaussians, pipeline, background)
+
 
 if __name__ == "__main__":
     # Set up command line argument parser

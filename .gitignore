@@ -1,0 +1,20 @@
+# 忽略 ./output 目录及其所有内容
+/output/
+
+# 忽略 ./data 目录及其所有内容
+/data/
+
+/submodules/
+# 忽略 Python 字节码缓存目录
+__pycache__/
+*.py[cod]
+
+# 忽略 Python 虚拟环境（通常不需要上传）
+venv/
+env/
+.venv/
+
+# 忽略 Python 安装的包（如果需要的话）
+*.egg-info/
+*.egg
+.pytest_cache/

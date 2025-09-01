@@ -24,36 +24,35 @@ from utils.general_utils import strip_symmetric, build_scaling_rotation
 
 # import math
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
+from tqdm import tqdm
+import time
 
-def get_mvs_prune_mask(points , cams, prune_thr=0.8, mask=None):
-
-    points = points.clone().to("cpu")
+def get_mvs_prune_mask(points , cams, prune_thr=0.8, mask=None, chunk_size = 2000):
 
     def feature_sim(feature0,feature1):
         f0 = feature0
         f1 = feature1
         sim_map = torch.sum(f0*f1,dim=0)/(torch.norm(f0,dim=0)*torch.norm(f1,dim=0))
         return sim_map
-
-    images = [infos.original_image.clone().to("cpu") for infos in cams]   
-
+    
+    prune_masks = np.array([])
 
     if mask !=None:
         features =   [infos.original_feature[mask, ...] for infos in cams]   
     else:
         features =   [infos.original_feature for infos in cams]   
-
+    feature_map = torch.stack(features, dim=0)
     T = [torch.tensor(infos.T,dtype = torch.float).to("cpu") for infos in cams]
     R = [torch.tensor(infos.R,dtype = torch.float).to("cpu") for infos in cams]
     FovY = [infos.FoVy for infos in cams]
     FovX = [infos.FoVx for infos in cams]
+    images = [infos.original_image.clone().to("cpu") for infos in cams]   
 
     H,W = images[0].shape[1:]
 
     focal_y =  fov2focal(FovY[0], H)
     focal_x =  fov2focal(FovX[0], W)
 
-    
     K = torch.tensor(
         [
             [focal_x, 0, W/2],
@@ -62,44 +61,65 @@ def get_mvs_prune_mask(points , cams, prune_thr=0.8, mask=None):
         ],
         dtype=torch.float32,
     )
-    feature_map = torch.tensor([])
-    uv = torch.tensor([])
-    for idx, img in enumerate(images):
 
-        img_feature = features[idx]
-        feature_map = torch.concat((feature_map,img_feature[None,...]),dim=0)
-        w2v = getWorld2View2(R=R[idx].numpy(),t=T[idx].numpy())
-        R_w2v = torch.tensor(w2v[:3,:3], dtype=torch.float32)
-        T_w2v = torch.tensor(w2v[:3,-1], dtype=torch.float32)
+    for i in range(0, points.shape[0], chunk_size):
+        points_chunk = points[i:i+chunk_size].clone().to("cpu")
 
-        point_c = (R_w2v[None,...] @ points[...,None])[...,0] + T_w2v
+        uv = torch.tensor([])
+        for idx, img in enumerate(images):
 
-        point_c = point_c.to(torch.float32)
-        point_c = point_c/np.abs(point_c[...,-1][...,None])
 
-        uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:]
-        uv = torch.concat((uv,uv_l[None,...]),dim=0)
+            w2v = getWorld2View2(R=R[idx].numpy(),t=T[idx].numpy())
+            R_w2v = torch.tensor(w2v[:3,:3], dtype=torch.float32)
+            T_w2v = torch.tensor(w2v[:3,-1], dtype=torch.float32)
 
-    mask = (uv[:,:,1]<  H) * (uv[:,:,0]<W) * (uv[:,:,1]>=0) * (uv[:,:,0]>=0) * uv[:,:,-1]>0
-    uv = uv[...,:2]
+            point_c = (R_w2v[None,...] @ points_chunk[...,None])[...,0] + T_w2v
 
-    tau = prune_thr
-    uv = uv.to(torch.int64)
-    prune_mask = []
-    for i in range(mask.shape[1]):
-        selected_feature = feature_map[mask[:,i],:,uv[mask[:,i],i,1],uv[mask[:,i],i,0]]
-        prune_flag = True
-        if selected_feature is not None:
-            if selected_feature.shape[0]>1:
-                for i in range(selected_feature.shape[0]):
-                    for j in range(i+1,selected_feature.shape[0]):
-                        sim_f = feature_sim(selected_feature[i],selected_feature[j])
-                        if sim_f > tau:
-                            prune_flag = False
-        prune_mask.append(prune_flag)
-    prune_mask = np.stack(prune_mask)
+            point_c = point_c.to(torch.float32)
+            point_c = point_c/np.abs(point_c[...,-1][...,None])
 
-    return torch.tensor(prune_mask).to("cuda:0")
+            uv_l = (K[None,...] @ point_c[...,None])[...,0][...,:]
+            uv = torch.concat((uv,uv_l[None,...]),dim=0)
+
+        mask_p = (uv[:,:,1]<  H) * (uv[:,:,0]<W) * (uv[:,:,1]>=0) * (uv[:,:,0]>=0) * uv[:,:,-1]>0
+        uv = uv[...,:2]
+
+        tau = prune_thr
+        uv = uv.to(torch.int64)
+        prune_mask = []
+        max_sims = []
+        for i in range(mask_p.shape[1]):
+            ### feature convolution
+            max_sim = 0
+            ###
+            
+            selected_feature = feature_map[mask_p[:,i],:,uv[mask_p[:,i],i,1],uv[mask_p[:,i],i,0]]
+            prune_flag = True
+            if selected_feature is not None:
+                if selected_feature.shape[0]>1:
+                    for f_i in range(selected_feature.shape[0]):
+                        for j in range(f_i+1,selected_feature.shape[0]):
+                            sim_f = feature_sim(selected_feature[f_i],selected_feature[j])
+
+                            if sim_f > tau:
+                                prune_flag = False
+                            
+                            if sim_f > max_sim:
+                                max_sim = sim_f
+            max_sims.append(max_sim)
+            prune_mask.append(prune_flag)
+
+        if len(max_sims)>0:
+
+            prune_mask = np.stack(max_sims)<np.stack(max_sims).mean()
+        else:
+            prune_mask = np.array([])
+        prune_masks = np.concatenate((prune_masks, prune_mask), axis=0)
+
+        del points_chunk
+
+    return torch.tensor(prune_masks).to(bool).to("cuda:0")
+
 
 
 class GaussianModel:
@@ -485,7 +505,9 @@ class GaussianModel:
 
     def mvs_prune(self, cams, mvs_prune_threshold, mask=None):
         if cams!=None:
+
             mvs_prune_mask = get_mvs_prune_mask(self._xyz,cams=cams,prune_thr=mvs_prune_threshold, mask=mask)
+
             self.prune_points(mvs_prune_mask)   
 
 
